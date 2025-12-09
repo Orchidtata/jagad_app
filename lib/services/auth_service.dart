@@ -6,7 +6,7 @@ class ApiService {
   // ✅ Private constructor untuk singleton
   ApiService._();
   
-  static const String baseUrl = 'http://172.18.216.143:8000/api';
+  static const String baseUrl = 'http://172.18.210.102:8000/api';
   
   // ✅ FIXED: Get JWT token (not Firebase token)
   static Future<String?> getToken() async {

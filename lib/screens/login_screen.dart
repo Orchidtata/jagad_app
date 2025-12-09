@@ -5,6 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
+import 'package:jagar/services/panitia_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -35,19 +36,28 @@ class _LoginScreenState extends State<LoginScreen>
     );
     _animController.forward();
 
+    _initializeLoginScreen();
+  }
+
+  Future<void> _initializeLoginScreen() async {
+    try {
+      await GoogleSignIn().signOut();
+      print('🔓 Google Sign-In cleared on init');
+    } catch (e) {
+      print('⚠ Error clearing Google Sign-In: $e');
+    }
+
     _checkLoginStatus();
   }
 
-  // ✅ FIXED: Check JWT token validity
   Future<void> _checkLoginStatus() async {
     final prefs = await SharedPreferences.getInstance();
     final jwtToken = prefs.getString('jwtToken');
-    
+
     if (jwtToken != null && jwtToken.isNotEmpty) {
-      // Verify JWT token with backend
       try {
         final response = await http.post(
-          Uri.parse('http://172.18.216.143:8000/api/auth/verify-token'),
+          Uri.parse('http://172.18.210.102:8000/api/auth/verify-token'),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $jwtToken',
@@ -57,22 +67,15 @@ class _LoginScreenState extends State<LoginScreen>
         final data = jsonDecode(response.body);
 
         if (response.statusCode == 200 && data['success'] == true) {
-          // Token valid, navigate to home
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
-            );
-          }
+          // ✅ Token valid, cek role panitia
+          await _checkPanitiaAccessAndNavigate();
         } else {
-          // Token invalid, clear storage
           await prefs.remove('jwtToken');
           await prefs.remove('firebaseToken');
           await prefs.remove('user');
         }
       } catch (e) {
         print('❌ Token verification error: $e');
-        // Clear invalid token
         await prefs.remove('jwtToken');
         await prefs.remove('firebaseToken');
         await prefs.remove('user');
@@ -88,24 +91,126 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  // ✅ FIXED: Sign in with Google and get JWT token
+  /// ✅ UPDATED: Check panitia access setelah login
+  Future<void> _checkPanitiaAccessAndNavigate() async {
+    try {
+      final accessData = await PanitiaService.checkPanitiaAccess();
+      
+      if (accessData['success'] == true) {
+        final hasPanitiaRole = accessData['has_panitia_role'] ?? false;
+        final hasAssignedEvents = accessData['has_assigned_events'] ?? false;
+        
+        if (!hasPanitiaRole) {
+          // ❌ Bukan role Panitia
+          _showAccessDeniedDialog(
+            'Akses Ditolak',
+            'Hanya pengguna dengan role Panitia yang dapat mengakses aplikasi ini.',
+          );
+          await _clearAuthData();
+          return;
+        }
+        
+        if (!hasAssignedEvents) {
+          // ❌ Panitia tapi belum ditugaskan ke event manapun
+          _showAccessDeniedDialog(
+            'Tidak Ada Penugasan',
+            'Anda belum ditugaskan ke event manapun. Silakan hubungi administrator.',
+          );
+          await _clearAuthData();
+          return;
+        }
+        
+        // ✅ Role Panitia dan ada penugasan, navigate ke home
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
+        }
+      } else {
+        // Error checking access
+        _showErrorDialog('Gagal memeriksa akses. Silakan coba lagi.');
+        await _clearAuthData();
+      }
+    } catch (e) {
+      print('❌ Error checking panitia access: $e');
+      _showErrorDialog('Terjadi kesalahan. Silakan coba lagi.');
+      await _clearAuthData();
+    }
+  }
+
+  /// ✅ Clear auth data
+  Future<void> _clearAuthData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('jwtToken');
+    await prefs.remove('firebaseToken');
+    await prefs.remove('user');
+    await prefs.remove('isAuthenticated');
+    
+    await GoogleSignIn().signOut();
+    await FirebaseAuth.instance.signOut();
+  }
+
+  /// ✅ Show access denied dialog
+  void _showAccessDeniedDialog(String title, String message) {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ✅ Show error dialog
+  void _showErrorDialog(String message) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// ✅ UPDATED: Sign in dengan Google + check panitia access
   Future<void> _signInWithGoogle() async {
     if (_isLoading) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
-      // 1. Google Sign In
+      await GoogleSignIn().signOut();
+      await FirebaseAuth.instance.signOut();
+
+      print('🔓 Previous sessions cleared');
+
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+
       if (googleUser == null) {
+        print('❌ User cancelled Google Sign-In');
         setState(() => _isLoading = false);
         return;
       }
 
+      print('✅ Google user selected: ${googleUser.email}');
+
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
 
-      // 2. Firebase Authentication
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
@@ -114,18 +219,16 @@ class _LoginScreenState extends State<LoginScreen>
       final userCredential =
           await FirebaseAuth.instance.signInWithCredential(credential);
 
-      // 3. Get Firebase ID Token
       final firebaseToken = await userCredential.user?.getIdToken();
 
       if (firebaseToken == null) {
         throw Exception('Firebase token tidak ditemukan');
       }
 
-      print('🔑 Firebase token obtained: ${firebaseToken.substring(0, 30)}...');
+      print('🔑 Firebase token obtained');
 
-      // 4. Send Firebase token to backend to get JWT
       final response = await http.post(
-        Uri.parse('http://172.18.216.143:8000/api/auth/firebase'),
+        Uri.parse('http://172.18.210.102:8000/api/auth/firebase'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'firebase_token': firebaseToken}),
       );
@@ -135,30 +238,23 @@ class _LoginScreenState extends State<LoginScreen>
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
-        // ✅ FIXED: Save JWT token (not Firebase token)
         final prefs = await SharedPreferences.getInstance();
-        
-        final jwtToken = data['data']['token']; // 🔑 JWT Token from backend
+
+        final jwtToken = data['data']['token'];
         final userData = data['data']['user'];
         final tokenExpiresAt = data['data']['expires_at'];
 
-        // Save JWT token
         await prefs.setString('jwtToken', jwtToken);
-        await prefs.setString('firebaseToken', firebaseToken); // Keep for reference
+        await prefs.setString('firebaseToken', firebaseToken);
         await prefs.setString('user', jsonEncode(userData));
         await prefs.setString('tokenExpiresAt', tokenExpiresAt);
         await prefs.setBool('isAuthenticated', true);
 
-        print('✅ JWT token saved');
+        print('✅ Login successful');
         print('👤 User: ${userData['nama']}');
-        print('🎭 Roles: ${userData['roles']}');
 
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
-          );
-        }
+        // ✅ Check panitia access before navigating
+        await _checkPanitiaAccessAndNavigate();
       } else {
         throw Exception(data['message'] ?? 'Login gagal');
       }
@@ -179,7 +275,6 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  // Manual login (for testing - should use backend API in production)
   void _manualLogin() async {
     if (_namaController.text.isEmpty || _nipController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -191,13 +286,13 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      // TODO: Call backend login API
-      // For now, save dummy data
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user', jsonEncode({
-        'nama': _namaController.text,
-        'nip': _nipController.text,
-      }));
+      await prefs.setString(
+          'user',
+          jsonEncode({
+            'nama': _namaController.text,
+            'nip': _nipController.text,
+          }));
       await prefs.setBool('isAuthenticated', true);
 
       if (mounted) {
@@ -299,7 +394,7 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    'WELCOME!',
+                    'WELCOME PANITIA!',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 24,

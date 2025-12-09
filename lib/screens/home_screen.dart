@@ -5,9 +5,12 @@ import 'package:jagar/providers/event_provider.dart';
 import 'package:jagar/screens/activity_history_screen.dart';
 import 'package:jagar/screens/event_buyers_screen.dart';
 import 'package:jagar/screens/login_screen.dart';
+import 'package:jagar/screens/profile_screen.dart';
 import 'package:jagar/services/api_config.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -136,9 +139,10 @@ class _HomeScreenState extends State<HomeScreen> {
               leading: const Icon(Icons.person, color: Color(0xFF7B0000)),
               title: const Text('Profile'),
               onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Menu Profile diklik")),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const ProfileScreen()),
                 );
               },
             ),
@@ -299,18 +303,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// ✅ Fungsi logout dengan clear token
+  /// ✅ FIXED: Logout dengan clear Google Sign-In
   Future<void> _logout(BuildContext context) async {
     try {
       final eventProvider = Provider.of<EventProvider>(context, listen: false);
 
-      // Clear token via provider
+      // 1. Logout dari backend
       await eventProvider.logout();
 
-      // Clear SharedPreferences
+      // 2. Sign out dari Google
+      await GoogleSignIn().signOut();
+
+      // 3. Sign out dari Firebase
+      await FirebaseAuth.instance.signOut();
+
+      // 4. Clear SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
-      print('✅ Logout successful, navigating to login...');
+      print('✅ Logout successful (Google + Firebase + Backend)');
 
       // Navigate ke login
       if (mounted) {

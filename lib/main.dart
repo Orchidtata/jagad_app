@@ -1,6 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:jagar/providers/event_provider.dart';
+import 'package:jagar/providers/auth_provider.dart';
 import 'package:jagar/providers/scan_history_provider.dart';
 import 'package:jagar/providers/ticket_provider.dart';
 import 'package:jagar/screens/login_screen.dart';
@@ -27,6 +28,7 @@ class JagadBadungApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => EventProvider()),
         ChangeNotifierProvider(create: (_) => TicketProvider()),
         ChangeNotifierProvider(create: (_) => ScanHistoryProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
       child: MaterialApp(
         title: 'Jagad Badung Events',

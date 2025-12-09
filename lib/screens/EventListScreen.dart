@@ -310,7 +310,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
 
     try {
       final eventProvider = Provider.of<EventProvider>(context, listen: false);
-      final event = await eventProvider.fetchEventById(widget.eventId);
+      final event = await eventProvider.getEventById(widget.eventId);
 
       setState(() {
         _event = event;

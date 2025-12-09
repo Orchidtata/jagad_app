@@ -69,7 +69,7 @@ class User {
     // If relative path from backend
     if (photo!.startsWith('/storage/')) {
       // Update this URL to match your backend
-      const baseUrl = 'http://172.18.216.143:8000';
+      const baseUrl = 'http://172.18.210.102:8000';
       return '$baseUrl$photo';
     }
     
